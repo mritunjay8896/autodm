@@ -79,7 +79,10 @@ async function syncUserRecord(authUser) {
 
 const INSTAGRAM_APP_ID = "1097121733196692";
 const INSTAGRAM_ACCESS_TOKEN = "IGAAPl048uu5RBZAGE3WEZAEVXdUTVNyeXdULVh1YUZAIRGo2aXlMbG1fY0FuMHl1OFZAxdTBmN2lQVkVfeF9XaWNDR2ZARV3d6ZAVVvYmUtUk5wbmNIRnpDOE9GVXBEdnczelVmN2VfV3JrSlFuMkM1RDN4TkhQSU5uTUJqNkZAyNE55VQZDZD";
-const DEFAULT_VERIFY_TOKEN = "IGAAPl048uu5RBZAGE3WEZAEVXdUTVNyeXdULVh1YUZAIRGo2aXlMbG1fY0FuMHl1OFZAxdTBmN2lQVkVfeF9XaWNDR2ZARV3d6ZAVVvYmUtUk5wbmNIRnpDOE9GVXBEdnczelVmN2VfV3JrSlFuMkM1RDN4TkhQSU5uTUJqNkZAyNE55VQZDZD";
+const DEFAULT_VERIFY_TOKEN = "auto_dm_webhook_secret_2026";
+
+const SUPABASE_URL = "https://bcrxhujkttforhmotrkj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJjcnhodWprdHRmb3JobW90cmtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2ODA5MzQsImV4cCI6MjEwNjI1NjkzNH0.XxIbPhkqTXjqQ5KW1RhEd5DxiED69NCtL49GprM8FUE";
 
 const DEFAULT_FUNNEL = {
   id: 'funnel-default-1',
@@ -588,18 +591,46 @@ export default function App() {
 
   const loadFunnels = async () => {
     try {
+      // 1. Fetch live funnels from Supabase Postgres database
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/funnels?order=created_at.desc`, {
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map(f => ({
+            id: f.id,
+            name: f.name,
+            keyword: f.keyword,
+            matchType: f.match_type || 'contains',
+            dmMessage: f.dm_message,
+            publicReply: f.public_reply,
+            mediaId: f.media_id || 'all',
+            isActive: f.is_active,
+            triggerCount: f.trigger_count || 0,
+            createdAt: f.created_at
+          }));
+          setFunnels(mapped);
+          const storageKey = getTenantKey('autodm_funnels');
+          localStorage.setItem(storageKey, JSON.stringify(mapped));
+          return;
+        }
+      }
+
+      // Fallback to local storage if offline
       const storageKey = getTenantKey('autodm_funnels');
       const stored = localStorage.getItem(storageKey);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        setFunnels(parsed);
-        syncFunnelsToWebhook(parsed);
+        setFunnels(JSON.parse(stored));
       } else {
         setFunnels([DEFAULT_FUNNEL]);
-        localStorage.setItem(storageKey, JSON.stringify([DEFAULT_FUNNEL]));
-        syncFunnelsToWebhook([DEFAULT_FUNNEL]);
       }
     } catch (err) {
+      console.warn("Notice loading funnels:", err);
       setFunnels([DEFAULT_FUNNEL]);
     }
   };
@@ -607,62 +638,50 @@ export default function App() {
   const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   const loadWebhookInfo = async () => {
-    try {
-      if (isLocalHost) {
-        const res = await fetch('/api/webhook/info').catch(() => null);
-        if (res && res.ok) {
-          const data = await res.json();
-          setWebhookInfo({
-            ...data,
-            cloudFunctionUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook"
-          });
-          return;
-        }
-      }
-      setWebhookInfo({
-        webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
-        verifyToken: DEFAULT_VERIFY_TOKEN,
-        appId: INSTAGRAM_APP_ID
-      });
-    } catch (err) {
-      setWebhookInfo({
-        webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
-        verifyToken: DEFAULT_VERIFY_TOKEN,
-        appId: INSTAGRAM_APP_ID
-      });
-    }
+    setWebhookInfo({
+      webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
+      cloudFunctionUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
+      verifyToken: DEFAULT_VERIFY_TOKEN,
+      appId: INSTAGRAM_APP_ID
+    });
   };
 
   const loadLogs = async () => {
     try {
-      // 1. Fetch live activity stream from Supabase Edge Function
-      const sbRes = await fetch("https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook?action=logs").catch(() => null);
-      if (sbRes && sbRes.ok) {
-        const sbData = await sbRes.json();
-        if (sbData.logs && sbData.logs.length > 0) {
-          setLogs(sbData.logs);
-          localStorage.setItem('autodm_logs', JSON.stringify(sbData.logs));
+      // 1. Fetch live activity stream from Supabase Postgres database
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/activity_logs?order=timestamp.desc&limit=50`, {
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map(l => ({
+            id: l.id,
+            timestamp: l.timestamp,
+            type: l.type,
+            username: l.username,
+            commentText: l.comment_text,
+            ruleName: l.rule_name,
+            dmMessage: l.dm_message,
+            status: l.status,
+            details: l.details
+          }));
+          setLogs(mapped);
+          localStorage.setItem('autodm_logs', JSON.stringify(mapped));
           return;
         }
       }
 
-      // 2. Try local server only if running locally
-      if (isLocalHost) {
-        const res = await fetch('/api/logs').catch(() => null);
-        if (res && res.ok) {
-          const data = await res.json();
-          if (data.logs) {
-            setLogs(data.logs);
-            return;
-          }
-        }
-      }
       const stored = localStorage.getItem('autodm_logs');
       if (stored) {
         setLogs(JSON.parse(stored));
       }
     } catch (err) {
-      // fallback
+      console.warn("Notice loading activity logs:", err);
     }
   };
 
@@ -738,29 +757,31 @@ export default function App() {
     try {
       const storageKey = getTenantKey('autodm_funnels');
       const updated = [rulePayload, ...funnels];
-
-      if (isLocalHost) {
-        const res = await fetch('/api/funnels', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(rulePayload)
-        }).catch(() => null);
-
-        if (res && res.ok) {
-          const data = await res.json();
-          if (data.funnel) {
-            setFunnels([data.funnel, ...funnels]);
-            syncFunnelsToWebhook([data.funnel, ...funnels]);
-            setIsCreatingFunnel(false);
-            return;
-          }
-        }
-      }
-
-      // Storage & Supabase Sync
       setFunnels(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      syncFunnelsToWebhook(updated);
+
+      // Persist directly to Supabase Postgres
+      fetch(`${SUPABASE_URL}/rest/v1/funnels`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({
+          id: rulePayload.id,
+          user_id: user?.uid || 'default',
+          name: rulePayload.name,
+          keyword: rulePayload.keyword,
+          match_type: rulePayload.matchType,
+          dm_message: rulePayload.dmMessage,
+          public_reply: rulePayload.publicReply || null,
+          media_id: rulePayload.mediaId || 'all',
+          is_active: true,
+          trigger_count: 0
+        })
+      }).catch(err => console.warn("Supabase funnel save notice:", err));
 
       setIsCreatingFunnel(false);
       setNewFunnel({
@@ -778,22 +799,24 @@ export default function App() {
 
   const handleToggleFunnel = async (id) => {
     try {
-      if (isLocalHost) {
-        const res = await fetch(`/api/funnels/${id}/toggle`, { method: 'POST' }).catch(() => null);
-        if (res && res.ok) {
-          const data = await res.json();
-          if (data.funnel) {
-            setFunnels(funnels.map(f => f.id === id ? data.funnel : f));
-            return;
-          }
-        }
-      }
+      const target = funnels.find(f => f.id === id);
+      const newStatus = target ? !target.isActive : true;
 
       const storageKey = getTenantKey('autodm_funnels');
-      const updated = funnels.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f);
+      const updated = funnels.map(f => f.id === id ? { ...f, isActive: newStatus } : f);
       setFunnels(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      syncFunnelsToWebhook(updated);
+
+      // Update in Supabase Postgres
+      fetch(`${SUPABASE_URL}/rest/v1/funnels?id=eq.${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ is_active: newStatus })
+      }).catch(err => console.warn("Supabase toggle notice:", err));
     } catch (err) {
       console.error('Error toggling funnel:', err);
     }
@@ -801,14 +824,19 @@ export default function App() {
 
   const handleDeleteFunnel = async (id) => {
     try {
-      if (isLocalHost) {
-        await fetch(`/api/funnels/${id}`, { method: 'DELETE' }).catch(() => null);
-      }
       const storageKey = getTenantKey('autodm_funnels');
       const updated = funnels.filter(f => f.id !== id);
       setFunnels(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
-      syncFunnelsToWebhook(updated);
+
+      // Delete from Supabase Postgres
+      fetch(`${SUPABASE_URL}/rest/v1/funnels?id=eq.${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: {
+          "apikey": SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      }).catch(err => console.warn("Supabase delete notice:", err));
     } catch (err) {
       console.error('Error deleting funnel:', err);
     }
