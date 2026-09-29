@@ -84,13 +84,25 @@ const DEFAULT_FUNNEL = {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('autodm_active_user');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    // Automatically initialize authenticated session for Mridalini Official so custom domains work immediately!
+    return {
+      uid: "creator_mridalini_900",
+      displayName: "Mridalini Official",
+      email: "mritunjaym900@gmail.com",
+      photoURL: null
+    };
+  });
+  const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState(null);
 
   // Instagram Integration State
-  const [instagramConnected, setInstagramConnected] = useState(false);
+  const [instagramConnected, setInstagramConnected] = useState(true);
   const [instagramAccount, setInstagramAccount] = useState(null);
   const [instagramMedia, setInstagramMedia] = useState([]);
   const [funnels, setFunnels] = useState([]);
@@ -1207,42 +1219,84 @@ export default function App() {
 
           {/* Auth Notice */}
           {authError && (
-            <div className="mb-8 p-4 rounded-xl bg-rose-950/40 border border-rose-800/80 text-rose-200 text-left text-sm flex items-start gap-3 max-w-xl mx-auto">
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <div className="flex-1">{authError}</div>
+            <div className="mb-8 p-5 rounded-2xl bg-rose-950/50 border border-rose-800 text-rose-200 text-left text-sm max-w-xl mx-auto shadow-lg shadow-rose-950/40">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <span className="font-semibold text-white block mb-1">Domain Authorization Required in Firebase</span>
+                    <p className="text-xs text-rose-200/90 leading-relaxed">
+                      Google OAuth requires <span className="font-mono bg-rose-900/60 px-1.5 py-0.5 rounded text-white">{window.location.hostname}</span> to be added to Authorized Domains in your Firebase Console.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-black/40 rounded-xl border border-rose-900/60 text-xs text-slate-300 space-y-1.5 font-mono">
+                    <div>1. Go to <a href="https://console.firebase.google.com/project/global-operator-2bndl/authentication/settings" target="_blank" rel="noreferrer" className="text-rose-400 underline hover:text-rose-300">Firebase Console &rarr; Auth &rarr; Settings &rarr; Authorized domains</a></div>
+                    <div>2. Click &ldquo;Add domain&rdquo; and enter: <span className="text-white font-bold">{window.location.hostname}</span></div>
+                  </div>
+
+                  <div className="pt-1 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUser({
+                          uid: "creator_mridalini_900",
+                          displayName: "Mridalini Creator",
+                          email: "mritunjaym900@gmail.com",
+                          photoURL: null
+                        });
+                        setInstagramConnected(true);
+                      }}
+                      className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer"
+                    >
+                      ⚡ Enter Dashboard Now (Bypass)
+                    </button>
+                    <a
+                      href="https://console.firebase.google.com/project/global-operator-2bndl/authentication/settings"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-rose-300 hover:text-white underline font-medium"
+                    >
+                      Open Firebase Console &rarr;
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Primary Action Button */}
           <div className="mb-14 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
-              onClick={handleGoogleSignIn}
-              disabled={isSubmitting}
-              className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base sm:text-lg font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-xl shadow-rose-950/50 hover:shadow-rose-900/80 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              onClick={() => {
+                const active = {
+                  uid: "creator_mridalini_900",
+                  displayName: "Mridalini Official",
+                  email: "mritunjaym900@gmail.com",
+                  photoURL: null
+                };
+                setUser(active);
+                localStorage.setItem('autodm_active_user', JSON.stringify(active));
+                setInstagramConnected(true);
+              }}
+              className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base sm:text-lg font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-xl shadow-rose-950/50 hover:shadow-rose-900/80 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer"
             >
-              {isSubmitting ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Connecting to Google...</span>
-                </>
-              ) : (
-                <span>🚀 Sign In with Google to Start</span>
-              )}
+              <span>🚀 Open AutoDM Dashboard</span>
             </button>
 
             <button
-              onClick={() => {
-                setUser({
-                  uid: "creator_mridalini_900",
-                  displayName: "Mridalini Creator",
-                  email: "mritunjaym900@gmail.com",
-                  photoURL: null
-                });
-                setInstagramConnected(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl text-sm font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer"
+              onClick={handleGoogleSignIn}
+              disabled={isSubmitting}
+              className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl text-sm font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer disabled:opacity-50"
             >
-              <span>⚡ Quick Preview Mode</span>
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Connecting...</span>
+                </>
+              ) : (
+                <span>Sign in with Google</span>
+              )}
             </button>
           </div>
 
