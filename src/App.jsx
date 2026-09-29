@@ -266,6 +266,8 @@ export default function App() {
         if (newAcct.accessToken) {
           loadInstagramMedia(newAcct.accessToken);
         }
+        subscribeAccountToWebhooks(newAcct.accessToken, newAcct.id);
+        syncFunnelsToWebhook(funnels, newAcct);
       } else if (event.data && event.data.type === 'INSTAGRAM_AUTH_ERROR') {
         setPopupWaiting(false);
         setTokenError(event.data.error || 'Authentication notice');
@@ -386,6 +388,8 @@ export default function App() {
           } catch (e) {}
         }
         loadInstagramMedia(token);
+        subscribeAccountToWebhooks(token, newAcct.id);
+        syncFunnelsToWebhook(funnels, newAcct);
       } else {
         setTokenError(data.error?.message || "Invalid Instagram token. Please check and try again.");
       }
@@ -487,6 +491,8 @@ export default function App() {
         } catch (e) {}
 
         loadInstagramMedia(INSTAGRAM_ACCESS_TOKEN);
+        subscribeAccountToWebhooks(INSTAGRAM_ACCESS_TOKEN, demoAcct.id);
+        syncFunnelsToWebhook(funnels, demoAcct);
       }
     } catch (err) {
       console.warn('Notice loading demo account:', err);
@@ -547,15 +553,51 @@ export default function App() {
     }
   };
 
+  const subscribeAccountToWebhooks = async (token, accountId) => {
+    const activeToken = token || instagramAccount?.accessToken || INSTAGRAM_ACCESS_TOKEN;
+    try {
+      const res = await fetch(
+        `https://graph.instagram.com/v21.0/me/subscribed_apps?subscribed_fields=comments,messages&access_token=${encodeURIComponent(activeToken)}`,
+        { method: 'POST' }
+      );
+      const data = await res.json();
+      console.log("Subscribed Instagram account to webhooks:", data);
+    } catch (err) {
+      console.warn("Could not subscribe to webhooks:", err);
+    }
+  };
+
+  const syncFunnelsToWebhook = async (currentFunnels, currentAccount) => {
+    const acct = currentAccount || instagramAccount;
+    const token = acct?.accessToken || INSTAGRAM_ACCESS_TOKEN;
+    const accountId = acct?.id || "28503726299236968";
+    try {
+      await fetch("https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook?action=sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId,
+          accessToken: token,
+          funnels: currentFunnels || funnels
+        })
+      });
+    } catch (e) {
+      console.warn("Webhook sync notice:", e);
+    }
+  };
+
   const loadFunnels = async () => {
     try {
       const storageKey = getTenantKey('autodm_funnels');
       const stored = localStorage.getItem(storageKey);
       if (stored) {
-        setFunnels(JSON.parse(stored));
+        const parsed = JSON.parse(stored);
+        setFunnels(parsed);
+        syncFunnelsToWebhook(parsed);
       } else {
         setFunnels([DEFAULT_FUNNEL]);
         localStorage.setItem(storageKey, JSON.stringify([DEFAULT_FUNNEL]));
+        syncFunnelsToWebhook([DEFAULT_FUNNEL]);
       }
     } catch (err) {
       setFunnels([DEFAULT_FUNNEL]);
@@ -589,6 +631,18 @@ export default function App() {
 
   const loadLogs = async () => {
     try {
+      // 1. Fetch live activity stream from Supabase Edge Function
+      const sbRes = await fetch("https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook?action=logs").catch(() => null);
+      if (sbRes && sbRes.ok) {
+        const sbData = await sbRes.json();
+        if (sbData.logs && sbData.logs.length > 0) {
+          setLogs(sbData.logs);
+          localStorage.setItem('autodm_logs', JSON.stringify(sbData.logs));
+          return;
+        }
+      }
+
+      // 2. Try local server
       const res = await fetch('/api/logs').catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
@@ -682,17 +736,19 @@ export default function App() {
         body: JSON.stringify(rulePayload)
       }).catch(() => null);
 
+      const updated = [rulePayload, ...funnels];
       if (res && res.ok) {
         const data = await res.json();
         if (data.funnel) {
           setFunnels([data.funnel, ...funnels]);
+          syncFunnelsToWebhook([data.funnel, ...funnels]);
         }
       } else {
         // LocalStorage fallback for GitHub Pages (tenant scoped)
         const storageKey = getTenantKey('autodm_funnels');
-        const updated = [rulePayload, ...funnels];
         setFunnels(updated);
         localStorage.setItem(storageKey, JSON.stringify(updated));
+        syncFunnelsToWebhook(updated);
       }
 
       setIsCreatingFunnel(false);
@@ -724,6 +780,7 @@ export default function App() {
       const updated = funnels.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f);
       setFunnels(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
+      syncFunnelsToWebhook(updated);
     } catch (err) {
       console.error('Error toggling funnel:', err);
     }
@@ -736,6 +793,7 @@ export default function App() {
       const updated = funnels.filter(f => f.id !== id);
       setFunnels(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
+      syncFunnelsToWebhook(updated);
     } catch (err) {
       console.error('Error deleting funnel:', err);
     }
