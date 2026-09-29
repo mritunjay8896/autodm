@@ -604,16 +604,20 @@ export default function App() {
     }
   };
 
+  const isLocalHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
   const loadWebhookInfo = async () => {
     try {
-      const res = await fetch('/api/webhook/info').catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        setWebhookInfo({
-          ...data,
-          cloudFunctionUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook"
-        });
-        return;
+      if (isLocalHost) {
+        const res = await fetch('/api/webhook/info').catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          setWebhookInfo({
+            ...data,
+            cloudFunctionUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook"
+          });
+          return;
+        }
       }
       setWebhookInfo({
         webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
@@ -642,13 +646,15 @@ export default function App() {
         }
       }
 
-      // 2. Try local server
-      const res = await fetch('/api/logs').catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.logs) {
-          setLogs(data.logs);
-          return;
+      // 2. Try local server only if running locally
+      if (isLocalHost) {
+        const res = await fetch('/api/logs').catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.logs) {
+            setLogs(data.logs);
+            return;
+          }
         }
       }
       const stored = localStorage.getItem('autodm_logs');
@@ -730,26 +736,31 @@ export default function App() {
     };
 
     try {
-      const res = await fetch('/api/funnels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rulePayload)
-      }).catch(() => null);
-
+      const storageKey = getTenantKey('autodm_funnels');
       const updated = [rulePayload, ...funnels];
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.funnel) {
-          setFunnels([data.funnel, ...funnels]);
-          syncFunnelsToWebhook([data.funnel, ...funnels]);
+
+      if (isLocalHost) {
+        const res = await fetch('/api/funnels', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rulePayload)
+        }).catch(() => null);
+
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.funnel) {
+            setFunnels([data.funnel, ...funnels]);
+            syncFunnelsToWebhook([data.funnel, ...funnels]);
+            setIsCreatingFunnel(false);
+            return;
+          }
         }
-      } else {
-        // LocalStorage fallback for GitHub Pages (tenant scoped)
-        const storageKey = getTenantKey('autodm_funnels');
-        setFunnels(updated);
-        localStorage.setItem(storageKey, JSON.stringify(updated));
-        syncFunnelsToWebhook(updated);
       }
+
+      // Storage & Supabase Sync
+      setFunnels(updated);
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+      syncFunnelsToWebhook(updated);
 
       setIsCreatingFunnel(false);
       setNewFunnel({
@@ -767,12 +778,14 @@ export default function App() {
 
   const handleToggleFunnel = async (id) => {
     try {
-      const res = await fetch(`/api/funnels/${id}/toggle`, { method: 'POST' }).catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.funnel) {
-          setFunnels(funnels.map(f => f.id === id ? data.funnel : f));
-          return;
+      if (isLocalHost) {
+        const res = await fetch(`/api/funnels/${id}/toggle`, { method: 'POST' }).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.funnel) {
+            setFunnels(funnels.map(f => f.id === id ? data.funnel : f));
+            return;
+          }
         }
       }
 
@@ -788,7 +801,9 @@ export default function App() {
 
   const handleDeleteFunnel = async (id) => {
     try {
-      await fetch(`/api/funnels/${id}`, { method: 'DELETE' }).catch(() => null);
+      if (isLocalHost) {
+        await fetch(`/api/funnels/${id}`, { method: 'DELETE' }).catch(() => null);
+      }
       const storageKey = getTenantKey('autodm_funnels');
       const updated = funnels.filter(f => f.id !== id);
       setFunnels(updated);
@@ -805,23 +820,25 @@ export default function App() {
     setSimResult(null);
 
     try {
-      // 1. Try local server endpoint
-      const res = await fetch('/api/webhook/test-trigger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          commentText: simComment,
-          username: simUsername,
-          mediaId: simMediaId
-        })
-      }).catch(() => null);
+      // 1. Try local server endpoint only if local
+      if (isLocalHost) {
+        const res = await fetch('/api/webhook/test-trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            commentText: simComment,
+            username: simUsername,
+            mediaId: simMediaId
+          })
+        }).catch(() => null);
 
-      if (res && res.ok) {
-        const data = await res.json();
-        setSimResult(data);
-        loadLogs();
-        loadFunnels();
-        return;
+        if (res && res.ok) {
+          const data = await res.json();
+          setSimResult(data);
+          loadLogs();
+          loadFunnels();
+          return;
+        }
       }
 
       // 2. Client-side simulation fallback for GitHub Pages
