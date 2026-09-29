@@ -206,11 +206,11 @@ export default function App() {
       import.meta.env.VITE_AUTH_CALLBACK_URL ||
       "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/auth-instagram-callback";
 
-    // 3. Exact Meta OAuth Scopes required for Instagram Automations
-    const scope = "instagram_manage_messages,instagram_manage_comments,pages_manage_metadata,pages_show_list,pages_read_engagement";
+    // 3. Instagram Business Login Scopes
+    const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments";
 
-    // 4. Construct Meta OAuth URL with required query parameters
-    const metaOAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(
+    // 4. Construct Instagram OAuth URL with required query parameters
+    const instagramOAuthUrl = `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=1&client_id=${encodeURIComponent(
       YOUR_META_APP_ID
     )}&redirect_uri=${encodeURIComponent(
       REDIRECT_URI
@@ -218,8 +218,8 @@ export default function App() {
       scope
     )}&response_type=code&state=${encodeURIComponent(user.uid)}`;
 
-    // 5. Redirect the user's browser window to Meta's secure OAuth dialog endpoint
-    window.location.href = metaOAuthUrl;
+    // 5. Redirect the user's browser window to Instagram's OAuth dialog endpoint
+    window.location.href = instagramOAuthUrl;
   };
 
   const loadInstagramAccount = async () => {

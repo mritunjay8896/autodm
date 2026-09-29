@@ -24,38 +24,113 @@ serve(async (req) => {
   }
 
   try {
-    // Step A: Exchange code for Short-Lived Access Token
-    const tokenUrl = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
-    tokenUrl.searchParams.set("client_id", META_APP_ID);
-    tokenUrl.searchParams.set("client_secret", META_APP_SECRET);
-    tokenUrl.searchParams.set("redirect_uri", REDIRECT_URI);
-    tokenUrl.searchParams.set("code", code);
+    let accessToken = "";
+    let igUserId = "";
+    let igUsername = "";
 
-    const tokenRes = await fetch(tokenUrl.toString());
-    const tokenData = await tokenRes.json();
+    // -------------------------------------------------------------
+    // ATTEMPT 1: Instagram Business Login Token Exchange
+    // POST to https://api.instagram.com/oauth/access_token
+    // -------------------------------------------------------------
+    try {
+      const igFormData = new FormData();
+      igFormData.append("client_id", META_APP_ID);
+      igFormData.append("client_secret", META_APP_SECRET);
+      igFormData.append("grant_type", "authorization_code");
+      igFormData.append("redirect_uri", REDIRECT_URI);
+      igFormData.append("code", code);
 
-    if (!tokenData.access_token) {
-      throw new Error(tokenData.error?.message || "Failed to obtain short-lived access token.");
+      const igRes = await fetch("https://api.instagram.com/oauth/access_token", {
+        method: "POST",
+        body: igFormData
+      });
+
+      const igData = await igRes.json();
+      console.log("Instagram OAuth response:", JSON.stringify(igData));
+
+      if (igData.access_token) {
+        accessToken = igData.access_token;
+        igUserId = String(igData.user_id || "");
+
+        // Upgrade to long-lived 60-day token
+        try {
+          const longLivedUrl = `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(
+            META_APP_SECRET
+          )}&access_token=${encodeURIComponent(accessToken)}`;
+          const longRes = await fetch(longLivedUrl);
+          const longData = await longRes.json();
+          if (longData.access_token) {
+            accessToken = longData.access_token;
+          }
+        } catch (e) {
+          console.warn("Long-lived token upgrade notice:", e);
+        }
+
+        // Query Instagram user profile
+        try {
+          const profileUrl = `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${encodeURIComponent(
+            accessToken
+          )}`;
+          const profileRes = await fetch(profileUrl);
+          const profileData = await profileRes.json();
+          if (profileData.username) {
+            igUsername = profileData.username;
+            igUserId = profileData.id || igUserId;
+          }
+        } catch (e) {
+          console.warn("Profile query notice:", e);
+        }
+
+        const redirectUrl = `${FRONTEND_URL}?connected=true&handle=${encodeURIComponent(
+          igUsername || "instagram_user"
+        )}&id=${encodeURIComponent(igUserId)}`;
+        return Response.redirect(redirectUrl, 302);
+      }
+    } catch (igErr) {
+      console.warn("Instagram OAuth attempt notice:", igErr);
     }
 
-    // Step B: Exchange for 60-day Long-Lived Token
-    const longLivedUrl = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
-    longLivedUrl.searchParams.set("grant_type", "fb_exchange_token");
-    longLivedUrl.searchParams.set("client_id", META_APP_ID);
-    longLivedUrl.searchParams.set("client_secret", META_APP_SECRET);
-    longLivedUrl.searchParams.set("fb_exchange_token", tokenData.access_token);
+    // -------------------------------------------------------------
+    // ATTEMPT 2: Facebook Graph API OAuth Token Exchange
+    // GET https://graph.facebook.com/v19.0/oauth/access_token
+    // -------------------------------------------------------------
+    const fbTokenUrl = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
+    fbTokenUrl.searchParams.set("client_id", META_APP_ID);
+    fbTokenUrl.searchParams.set("client_secret", META_APP_SECRET);
+    fbTokenUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    fbTokenUrl.searchParams.set("code", code);
 
-    const longLivedRes = await fetch(longLivedUrl.toString());
-    const longLivedData = await longLivedRes.json();
-    const longLivedToken = longLivedData.access_token || tokenData.access_token;
+    const fbRes = await fetch(fbTokenUrl.toString());
+    const fbData = await fbRes.json();
 
-    // Step C: Query Meta /me/accounts for Facebook Pages & Instagram Business Account
+    if (!fbData.access_token) {
+      throw new Error(fbData.error?.message || "Failed to exchange authorization code for access token.");
+    }
+
+    accessToken = fbData.access_token;
+
+    // Exchange for 60-day Long-Lived Token
+    try {
+      const longLivedUrl = new URL("https://graph.facebook.com/v19.0/oauth/access_token");
+      longLivedUrl.searchParams.set("grant_type", "fb_exchange_token");
+      longLivedUrl.searchParams.set("client_id", META_APP_ID);
+      longLivedUrl.searchParams.set("client_secret", META_APP_SECRET);
+      longLivedUrl.searchParams.set("fb_exchange_token", accessToken);
+
+      const longRes = await fetch(longLivedUrl.toString());
+      const longData = await longRes.json();
+      if (longData.access_token) {
+        accessToken = longData.access_token;
+      }
+    } catch (e) {}
+
+    // Query Meta /me/accounts for Facebook Pages & Instagram Business Account
     const accountsUrl = new URL("https://graph.facebook.com/v19.0/me/accounts");
     accountsUrl.searchParams.set(
       "fields",
       "id,name,access_token,instagram_business_account{id,username,name,profile_picture_url}"
     );
-    accountsUrl.searchParams.set("access_token", longLivedToken);
+    accountsUrl.searchParams.set("access_token", accessToken);
 
     const accountsRes = await fetch(accountsUrl.toString());
     const accountsData = await accountsRes.json();
@@ -76,7 +151,6 @@ serve(async (req) => {
       return Response.redirect(redirectUrl, 302);
     }
 
-    // Step D: Redirect user back to frontend with success parameters
     const redirectUrl = `${FRONTEND_URL}?connected=true&handle=${encodeURIComponent(
       igAccount.username || ""
     )}&id=${encodeURIComponent(igAccount.id)}`;
