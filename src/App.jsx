@@ -7,7 +7,11 @@ import {
 import {
   doc,
   setDoc,
-  getDoc
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase.js';
 import {
@@ -67,7 +71,7 @@ async function syncUserRecord(authUser) {
 
 const INSTAGRAM_APP_ID = "1097121733196692";
 const INSTAGRAM_ACCESS_TOKEN = "IGAAPl048uu5RBZAGE3WEZAEVXdUTVNyeXdULVh1YUZAIRGo2aXlMbG1fY0FuMHl1OFZAxdTBmN2lQVkVfeF9XaWNDR2ZARV3d6ZAVVvYmUtUk5wbmNIRnpDOE9GVXBEdnczelVmN2VfV3JrSlFuMkM1RDN4TkhQSU5uTUJqNkZAyNE55VQZDZD";
-const DEFAULT_VERIFY_TOKEN = "auto_dm_webhook_secret_2026";
+const DEFAULT_VERIFY_TOKEN = "IGAAPl048uu5RBZAGE3WEZAEVXdUTVNyeXdULVh1YUZAIRGo2aXlMbG1fY0FuMHl1OFZAxdTBmN2lQVkVfeF9XaWNDR2ZARV3d6ZAVVvYmUtUk5wbmNIRnpDOE9GVXBEdnczelVmN2VfV3JrSlFuMkM1RDN4TkhQSU5uTUJqNkZAyNE55VQZDZD";
 
 const DEFAULT_FUNNEL = {
   id: 'funnel-default-1',
@@ -128,6 +132,23 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Handle Meta OAuth callback query parameters returned from Firebase Cloud Function
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get('connected');
+    const handle = params.get('handle');
+    const oauthError = params.get('error');
+
+    if (connected === 'true') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setInstagramConnected(true);
+      loadInstagramAccount();
+    } else if (oauthError) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      console.warn("Instagram connection error:", oauthError);
+    }
+  }, []);
+
   // Fetch Instagram & Webhook Data when logged in
   useEffect(() => {
     if (user || instagramConnected) {
@@ -138,10 +159,71 @@ export default function App() {
     }
   }, [user, instagramConnected]);
 
+  /**
+   * PART 1: FRONTEND META OAUTH REDIRECT HANDLER
+   * Initiates Meta's secure OAuth dialog with required scopes and user.uid as state.
+   */
+  const handleConnectInstagram = () => {
+    if (!user || !user.uid) {
+      console.warn("Cannot initiate Meta OAuth without authenticated user.");
+      return;
+    }
+
+    // 1. Meta App ID template variable (configurable via VITE_META_APP_ID)
+    const YOUR_META_APP_ID = import.meta.env.VITE_META_APP_ID || "1097121733196692";
+
+    // 2. Redirect URI pointing to Supabase Edge Function (or Firebase fallback)
+    const REDIRECT_URI =
+      import.meta.env.VITE_AUTH_CALLBACK_URL ||
+      "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/auth-instagram-callback";
+
+    // 3. Exact Meta OAuth Scopes required for Instagram Automations
+    const scope = "instagram_manage_messages,instagram_manage_comments,pages_manage_metadata,pages_show_list,pages_read_engagement";
+
+    // 4. Construct Meta OAuth URL with required query parameters
+    const metaOAuthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(
+      YOUR_META_APP_ID
+    )}&redirect_uri=${encodeURIComponent(
+      REDIRECT_URI
+    )}&scope=${encodeURIComponent(
+      scope
+    )}&response_type=code&state=${encodeURIComponent(user.uid)}`;
+
+    // 5. Redirect the user's browser window to Meta's secure OAuth dialog endpoint
+    window.location.href = metaOAuthUrl;
+  };
+
   const loadInstagramAccount = async () => {
     setLoadingIg(true);
     try {
-      // 1. Try local full-stack server
+      // 1. Query Cloud Firestore /instagram_accounts for the active user's connected account
+      if (user && user.uid) {
+        try {
+          const q = query(
+            collection(db, 'instagram_accounts'),
+            where('userId', '==', user.uid)
+          );
+          const snapshot = await getDocs(q);
+
+          if (!snapshot.empty) {
+            const accountDoc = snapshot.docs[0].data();
+            setInstagramAccount({
+              id: accountDoc.instagramAccountId,
+              username: accountDoc.handle,
+              name: accountDoc.handle,
+              accountType: 'BUSINESS',
+              profilePictureUrl: accountDoc.avatarUrl
+            });
+            setInstagramConnected(true);
+            loadInstagramMedia(accountDoc.accessToken);
+            return;
+          }
+        } catch (dbErr) {
+          console.warn('Firestore lookup for instagram_accounts:', dbErr?.message || dbErr);
+        }
+      }
+
+      // 2. Try local full-stack server
       const res = await fetch('/api/instagram/account').catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
@@ -153,21 +235,23 @@ export default function App() {
         }
       }
 
-      // 2. Client-side fallback for GitHub Pages (direct Meta Graph API)
-      const directRes = await fetch(
-        `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
-      );
-      const directData = await directRes.json();
-      if (directData && directData.id) {
-        setInstagramAccount({
-          id: directData.id,
-          username: directData.username,
-          name: directData.name || directData.username,
-          accountType: directData.account_type || 'BUSINESS',
-          profilePictureUrl: directData.profile_picture_url
-        });
-        setInstagramConnected(true);
-        loadInstagramMedia();
+      // 3. Client-side fallback for GitHub Pages (direct Meta Graph API)
+      if (INSTAGRAM_ACCESS_TOKEN) {
+        const directRes = await fetch(
+          `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
+        );
+        const directData = await directRes.json();
+        if (directData && directData.id) {
+          setInstagramAccount({
+            id: directData.id,
+            username: directData.username,
+            name: directData.name || directData.username,
+            accountType: directData.account_type || 'BUSINESS',
+            profilePictureUrl: directData.profile_picture_url
+          });
+          setInstagramConnected(true);
+          loadInstagramMedia(INSTAGRAM_ACCESS_TOKEN);
+        }
       }
     } catch (err) {
       console.warn('Notice loading Instagram account:', err);
@@ -230,17 +314,20 @@ export default function App() {
       const res = await fetch('/api/webhook/info').catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
-        setWebhookInfo(data);
+        setWebhookInfo({
+          ...data,
+          cloudFunctionUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook"
+        });
         return;
       }
       setWebhookInfo({
-        webhookUrl: `${window.location.origin}/api/webhook/instagram`,
+        webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
         verifyToken: DEFAULT_VERIFY_TOKEN,
         appId: INSTAGRAM_APP_ID
       });
     } catch (err) {
       setWebhookInfo({
-        webhookUrl: `${window.location.origin}/api/webhook/instagram`,
+        webhookUrl: "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/instagram-webhook",
         verifyToken: DEFAULT_VERIFY_TOKEN,
         appId: INSTAGRAM_APP_ID
       });
@@ -571,7 +658,7 @@ export default function App() {
               {/* Primary Connect Button */}
               <div>
                 <button
-                  onClick={loadInstagramAccount}
+                  onClick={handleConnectInstagram}
                   disabled={loadingIg}
                   className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-lg shadow-rose-950/40 transition-all cursor-pointer disabled:opacity-50"
                 >
@@ -583,7 +670,7 @@ export default function App() {
                   ) : (
                     <>
                       <span>🔌</span>
-                      <span>{instagramConnected ? 'Re-Sync Instagram Account' : 'Connect Instagram Business Account'}</span>
+                      <span>{instagramConnected ? 'Re-Connect Instagram Account' : 'Connect Instagram Business Account'}</span>
                     </>
                   )}
                 </button>

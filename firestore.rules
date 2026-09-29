@@ -44,10 +44,15 @@ service cloud.firestore {
         isValidUser(incoming());
       allow update: if isOwner(userId) &&
         isValidId(userId) &&
-        isValidUser(incoming()) &&
         incoming().uid == existing().uid &&
         incoming().createdAt == existing().createdAt;
       allow delete: if false; // Deletion handled via controlled admin/retention routines
+    }
+
+    // Instagram Accounts Collection: /instagram_accounts/{instagramAccountId}
+    match /instagram_accounts/{instagramAccountId} {
+      allow get, list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false; // Securely written by Firebase Cloud Function backend only
     }
   }
 }

@@ -1,0 +1,5 @@
+[functions.instagram-webhook]
+verify_jwt = false
+
+[functions.auth-instagram-callback]
+verify_jwt = false
