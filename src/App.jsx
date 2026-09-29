@@ -34,7 +34,9 @@ import {
   Sliders,
   Instagram,
   Terminal,
-  Clock
+  Clock,
+  Users,
+  Unlink
 } from 'lucide-react';
 
 // ==========================================
@@ -122,6 +124,11 @@ export default function App() {
   const [simResult, setSimResult] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  // Multi-tenant key helper
+  const getTenantKey = (prefix) => {
+    return user?.uid ? `${prefix}_${user.uid}` : prefix;
+  };
+
   // 4. onAuthStateChanged Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -132,32 +139,50 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Handle Meta OAuth callback query parameters returned from Firebase Cloud Function
+  // Handle Meta OAuth callback query parameters returned from Supabase Edge Function
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get('connected');
     const handle = params.get('handle');
+    const accountId = params.get('id');
     const oauthError = params.get('error');
 
     if (connected === 'true') {
       window.history.replaceState({}, document.title, window.location.pathname);
-      setInstagramConnected(true);
+      if (user?.uid && accountId) {
+        const newAcct = {
+          id: accountId,
+          username: handle || 'instagram_user',
+          name: handle || 'Instagram User',
+          accountType: 'BUSINESS',
+          profilePictureUrl: '',
+          accessToken: ''
+        };
+        setInstagramAccount(newAcct);
+        setInstagramConnected(true);
+        localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(newAcct));
+      }
       loadInstagramAccount();
     } else if (oauthError) {
       window.history.replaceState({}, document.title, window.location.pathname);
       console.warn("Instagram connection error:", oauthError);
     }
-  }, []);
+  }, [user?.uid]);
 
-  // Fetch Instagram & Webhook Data when logged in
+  // Fetch Instagram & Webhook Data when logged in (scoped to user.uid - NO INFINITE LOOP)
   useEffect(() => {
-    if (user || instagramConnected) {
+    if (user && user.uid) {
       loadInstagramAccount();
       loadFunnels();
       loadWebhookInfo();
       loadLogs();
+    } else {
+      setInstagramConnected(false);
+      setInstagramAccount(null);
+      setInstagramMedia([]);
+      setFunnels([]);
     }
-  }, [user, instagramConnected]);
+  }, [user?.uid]);
 
   /**
    * PART 1: FRONTEND META OAUTH REDIRECT HANDLER
@@ -194,65 +219,61 @@ export default function App() {
   };
 
   const loadInstagramAccount = async () => {
+    if (!user || !user.uid) {
+      setInstagramAccount(null);
+      setInstagramConnected(false);
+      setLoadingIg(false);
+      return;
+    }
+
     setLoadingIg(true);
     try {
-      // 1. Query Cloud Firestore /instagram_accounts for the active user's connected account
-      if (user && user.uid) {
+      // 1. Check user-specific localStorage first
+      const stored = localStorage.getItem(`autodm_account_${user.uid}`);
+      if (stored) {
         try {
-          const q = query(
-            collection(db, 'instagram_accounts'),
-            where('userId', '==', user.uid)
-          );
-          const snapshot = await getDocs(q);
-
-          if (!snapshot.empty) {
-            const accountDoc = snapshot.docs[0].data();
-            setInstagramAccount({
-              id: accountDoc.instagramAccountId,
-              username: accountDoc.handle,
-              name: accountDoc.handle,
-              accountType: 'BUSINESS',
-              profilePictureUrl: accountDoc.avatarUrl
-            });
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.id) {
+            setInstagramAccount(parsed);
             setInstagramConnected(true);
-            loadInstagramMedia(accountDoc.accessToken);
+            loadInstagramMedia(parsed.accessToken);
             return;
           }
-        } catch (dbErr) {
-          console.warn('Firestore lookup for instagram_accounts:', dbErr?.message || dbErr);
-        }
+        } catch (e) {}
       }
 
-      // 2. Try local full-stack server
-      const res = await fetch('/api/instagram/account').catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.connected && data.account) {
-          setInstagramAccount(data.account);
+      // 2. Query Cloud Firestore /instagram_accounts for THIS tenant's user.uid
+      try {
+        const q = query(
+          collection(db, 'instagram_accounts'),
+          where('userId', '==', user.uid)
+        );
+        const snapshot = await getDocs(q);
+
+        if (!snapshot.empty) {
+          const accountDoc = snapshot.docs[0].data();
+          const acct = {
+            id: accountDoc.instagramAccountId,
+            username: accountDoc.handle,
+            name: accountDoc.handle,
+            accountType: 'BUSINESS',
+            profilePictureUrl: accountDoc.avatarUrl,
+            accessToken: accountDoc.accessToken
+          };
+          setInstagramAccount(acct);
           setInstagramConnected(true);
-          loadInstagramMedia();
+          localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(acct));
+          loadInstagramMedia(accountDoc.accessToken);
           return;
         }
+      } catch (dbErr) {
+        console.warn('Firestore lookup for instagram_accounts:', dbErr?.message || dbErr);
       }
 
-      // 3. Client-side fallback for GitHub Pages (direct Meta Graph API)
-      if (INSTAGRAM_ACCESS_TOKEN) {
-        const directRes = await fetch(
-          `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
-        );
-        const directData = await directRes.json();
-        if (directData && directData.id) {
-          setInstagramAccount({
-            id: directData.id,
-            username: directData.username,
-            name: directData.name || directData.username,
-            accountType: directData.account_type || 'BUSINESS',
-            profilePictureUrl: directData.profile_picture_url
-          });
-          setInstagramConnected(true);
-          loadInstagramMedia(INSTAGRAM_ACCESS_TOKEN);
-        }
-      }
+      // 3. User is NOT connected - clean disconnected state (no forced demo)
+      setInstagramAccount(null);
+      setInstagramConnected(false);
+      setInstagramMedia([]);
     } catch (err) {
       console.warn('Notice loading Instagram account:', err);
     } finally {
@@ -260,7 +281,74 @@ export default function App() {
     }
   };
 
-  const loadInstagramMedia = async () => {
+  // Connect the demo @mridaliniofficial account for this tenant if requested
+  const handleConnectDemoAccount = async () => {
+    if (!user || !user.uid) return;
+    setLoadingIg(true);
+    try {
+      const directRes = await fetch(
+        `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
+      );
+      const directData = await directRes.json();
+      if (directData && directData.id) {
+        const demoAcct = {
+          id: directData.id,
+          username: directData.username,
+          name: directData.name || directData.username,
+          accountType: directData.account_type || 'BUSINESS',
+          profilePictureUrl: directData.profile_picture_url,
+          accessToken: INSTAGRAM_ACCESS_TOKEN
+        };
+        setInstagramAccount(demoAcct);
+        setInstagramConnected(true);
+        localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(demoAcct));
+
+        // Save to Firestore
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            instagramConnected: true,
+            instagramAccountId: demoAcct.id,
+            instagramHandle: demoAcct.username
+          }, { merge: true });
+        } catch (e) {}
+
+        loadInstagramMedia(INSTAGRAM_ACCESS_TOKEN);
+      }
+    } catch (err) {
+      console.warn('Notice loading demo account:', err);
+    } finally {
+      setLoadingIg(false);
+    }
+  };
+
+  // Disconnect Instagram from this tenant
+  const handleDisconnectInstagram = async () => {
+    if (!user || !user.uid) return;
+    setLoadingIg(true);
+    try {
+      localStorage.removeItem(`autodm_account_${user.uid}`);
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          instagramConnected: false,
+          instagramAccountId: null,
+          instagramHandle: null
+        }, { merge: true });
+      } catch (e) {}
+
+      setInstagramAccount(null);
+      setInstagramConnected(false);
+      setInstagramMedia([]);
+    } catch (err) {
+      console.error('Error disconnecting:', err);
+    } finally {
+      setLoadingIg(false);
+    }
+  };
+
+  const loadInstagramMedia = async (token) => {
+    const activeToken = token || instagramAccount?.accessToken || INSTAGRAM_ACCESS_TOKEN;
+    if (!activeToken) return;
+
     try {
       // 1. Try local server
       const res = await fetch('/api/instagram/media').catch(() => null);
@@ -272,9 +360,9 @@ export default function App() {
         }
       }
 
-      // 2. Direct Graph API fallback for GitHub Pages
+      // 2. Direct Graph API fallback
       const directRes = await fetch(
-        `https://graph.instagram.com/v21.0/me/media?fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25&access_token=${INSTAGRAM_ACCESS_TOKEN}`
+        `https://graph.instagram.com/v21.0/me/media?fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25&access_token=${activeToken}`
       );
       const directData = await directRes.json();
       if (directData && directData.data) {
@@ -287,22 +375,13 @@ export default function App() {
 
   const loadFunnels = async () => {
     try {
-      const res = await fetch('/api/funnels').catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.funnels) {
-          setFunnels(data.funnels);
-          return;
-        }
-      }
-
-      // LocalStorage fallback for GitHub Pages
-      const stored = localStorage.getItem('autodm_funnels');
+      const storageKey = getTenantKey('autodm_funnels');
+      const stored = localStorage.getItem(storageKey);
       if (stored) {
         setFunnels(JSON.parse(stored));
       } else {
         setFunnels([DEFAULT_FUNNEL]);
-        localStorage.setItem('autodm_funnels', JSON.stringify([DEFAULT_FUNNEL]));
+        localStorage.setItem(storageKey, JSON.stringify([DEFAULT_FUNNEL]));
       }
     } catch (err) {
       setFunnels([DEFAULT_FUNNEL]);
@@ -359,6 +438,7 @@ export default function App() {
     setAuthError(null);
 
     try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, googleProvider);
       if (result?.user) {
         await syncUserRecord(result.user);
@@ -374,6 +454,19 @@ export default function App() {
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSwitchUser = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setInstagramAccount(null);
+      setInstagramConnected(false);
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+      await handleGoogleSignIn();
+    } catch (err) {
+      console.error('Error switching user:', err);
     }
   };
 
@@ -421,10 +514,11 @@ export default function App() {
           setFunnels([data.funnel, ...funnels]);
         }
       } else {
-        // LocalStorage fallback for GitHub Pages
+        // LocalStorage fallback for GitHub Pages (tenant scoped)
+        const storageKey = getTenantKey('autodm_funnels');
         const updated = [rulePayload, ...funnels];
         setFunnels(updated);
-        localStorage.setItem('autodm_funnels', JSON.stringify(updated));
+        localStorage.setItem(storageKey, JSON.stringify(updated));
       }
 
       setIsCreatingFunnel(false);
@@ -452,9 +546,10 @@ export default function App() {
         }
       }
 
+      const storageKey = getTenantKey('autodm_funnels');
       const updated = funnels.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f);
       setFunnels(updated);
-      localStorage.setItem('autodm_funnels', JSON.stringify(updated));
+      localStorage.setItem(storageKey, JSON.stringify(updated));
     } catch (err) {
       console.error('Error toggling funnel:', err);
     }
@@ -463,9 +558,10 @@ export default function App() {
   const handleDeleteFunnel = async (id) => {
     try {
       await fetch(`/api/funnels/${id}`, { method: 'DELETE' }).catch(() => null);
+      const storageKey = getTenantKey('autodm_funnels');
       const updated = funnels.filter(f => f.id !== id);
       setFunnels(updated);
-      localStorage.setItem('autodm_funnels', JSON.stringify(updated));
+      localStorage.setItem(storageKey, JSON.stringify(updated));
     } catch (err) {
       console.error('Error deleting funnel:', err);
     }
@@ -581,8 +677,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Session Info & Log Out */}
-            <div className="flex items-center gap-4">
+            {/* Session Info, Switch User & Log Out */}
+            <div className="flex items-center gap-3">
               <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-slate-800">
                 {user.photoURL ? (
                   <img
@@ -596,8 +692,11 @@ export default function App() {
                   </div>
                 )}
                 <div className="text-left">
-                  <div className="text-sm font-semibold text-slate-200 leading-tight">
-                    {user.displayName || 'Creator'}
+                  <div className="text-sm font-semibold text-slate-200 leading-tight flex items-center gap-1.5">
+                    <span>{user.displayName || 'Creator'}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-900/60 font-mono">
+                      Tenant: {user.uid.slice(0, 6)}
+                    </span>
                   </div>
                   <div className="text-xs text-slate-400 leading-tight">
                     {user.email}
@@ -606,11 +705,20 @@ export default function App() {
               </div>
 
               <button
+                onClick={handleSwitchUser}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded-lg transition cursor-pointer"
+                title="Switch to another Google test account"
+              >
+                <Users className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden md:inline">Switch User</span>
+              </button>
+
+              <button
                 onClick={handleSignOut}
-                className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700/70 rounded-lg transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/70 rounded-lg transition-all cursor-pointer"
                 title="Log Out"
               >
-                <LogOut className="w-4 h-4 text-slate-400" />
+                <LogOut className="w-3.5 h-3.5 text-slate-400" />
                 <span>Log Out</span>
               </button>
             </div>
@@ -623,57 +731,103 @@ export default function App() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 mb-8 relative overflow-hidden backdrop-blur-sm">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="flex items-center gap-4">
-                {instagramAccount?.profilePictureUrl ? (
+                {instagramConnected && instagramAccount?.profilePictureUrl ? (
                   <img
                     src={instagramAccount.profilePictureUrl}
                     alt={instagramAccount.username}
-                    className="w-14 h-14 rounded-2xl ring-2 ring-rose-500/50 object-cover"
+                    className="w-14 h-14 rounded-2xl ring-2 ring-emerald-500/50 object-cover"
                   />
-                ) : (
+                ) : instagramConnected && instagramAccount ? (
                   <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center shadow-lg shadow-rose-950/40">
                     <Instagram className="w-7 h-7 text-white" />
+                  </div>
+                ) : (
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                    <Instagram className="w-7 h-7 text-slate-400" />
                   </div>
                 )}
 
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-xl font-bold text-white">
-                      {instagramAccount ? `@${instagramAccount.username}` : 'Instagram Account Not Connected'}
+                      {instagramConnected && instagramAccount
+                        ? `@${instagramAccount.username}`
+                        : 'Instagram Not Connected'}
                     </h2>
-                    {instagramConnected && (
+                    {instagramConnected && instagramAccount ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800 text-xs font-semibold">
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         Connected ({instagramAccount?.accountType || 'BUSINESS'})
                       </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-xs font-semibold">
+                        Ready to Link
+                      </span>
                     )}
                   </div>
                   <p className="text-sm text-slate-400 mt-1">
-                    {instagramAccount
+                    {instagramConnected && instagramAccount
                       ? `Account ID: ${instagramAccount.id} • Meta Graph API Active`
-                      : 'Connect your Instagram Professional or Creator account to start automating Comment-to-DM funnels.'}
+                      : 'Connect your Instagram Professional or Creator account (or Meta test user) for this tenant.'}
                   </p>
                 </div>
               </div>
 
-              {/* Primary Connect Button */}
-              <div>
-                <button
-                  onClick={handleConnectInstagram}
-                  disabled={loadingIg}
-                  className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-lg shadow-rose-950/40 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  {loadingIg ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Syncing Graph API...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>🔌</span>
-                      <span>{instagramConnected ? 'Re-Connect Instagram Account' : 'Connect Instagram Business Account'}</span>
-                    </>
-                  )}
-                </button>
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-3">
+                {instagramConnected && instagramAccount ? (
+                  <>
+                    <button
+                      onClick={handleConnectInstagram}
+                      disabled={loadingIg}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                      title="Connect a different Instagram account with Meta"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loadingIg ? 'animate-spin text-rose-400' : 'text-slate-400'}`} />
+                      <span>Switch / Reconnect Account</span>
+                    </button>
+
+                    <button
+                      onClick={handleDisconnectInstagram}
+                      disabled={loadingIg}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-rose-400 hover:text-rose-300 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-900/60 transition cursor-pointer"
+                      title="Disconnect Instagram from this user"
+                    >
+                      <Unlink className="w-4 h-4" />
+                      <span>Disconnect</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleConnectInstagram}
+                      disabled={loadingIg}
+                      className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-lg shadow-rose-950/40 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      {loadingIg ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Connecting Meta...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🔌</span>
+                          <span>Connect Instagram Business Account</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleConnectDemoAccount}
+                      disabled={loadingIg}
+                      className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                      title="Load @mridaliniofficial test account"
+                    >
+                      <span>🧪</span>
+                      <span>Use Test (@mridaliniofficial)</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
