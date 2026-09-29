@@ -36,7 +36,13 @@ import {
   Terminal,
   Clock,
   Users,
-  Unlink
+  Unlink,
+  Key,
+  X,
+  ShieldCheck,
+  HelpCircle,
+  Sparkles,
+  Globe
 } from 'lucide-react';
 
 // ==========================================
@@ -107,6 +113,16 @@ export default function App() {
   const [isConnectingDemo, setIsConnectingDemo] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
+
+  // Connect Modal & Popup OAuth State
+  const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [customAppId, setCustomAppId] = useState(() => localStorage.getItem('meta_app_id') || '1097121733196692');
+  const [loginDialogType, setLoginDialogType] = useState('instagram'); // 'instagram' | 'facebook'
+  const [manualTokenInput, setManualTokenInput] = useState('');
+  const [isVerifyingToken, setIsVerifyingToken] = useState(false);
+  const [tokenError, setTokenError] = useState(null);
+  const [popupWaiting, setPopupWaiting] = useState(false);
+  const [activeConnectTab, setActiveConnectTab] = useState('popup'); // 'popup' | 'token'
 
   // New Funnel Form State
   const [isCreatingFunnel, setIsCreatingFunnel] = useState(false);
@@ -186,40 +202,165 @@ export default function App() {
     }
   }, [user?.uid]);
 
+  // Listen for popup callback message
+  useEffect(() => {
+    const handleAuthMessage = async (event) => {
+      if (event.data && event.data.type === 'INSTAGRAM_AUTH_SUCCESS') {
+        const { handle, id, account } = event.data;
+        const newAcct = {
+          id: id || 'connected',
+          username: handle || 'instagram_user',
+          name: handle || 'Instagram User',
+          accountType: 'BUSINESS',
+          profilePictureUrl: account?.profilePictureUrl || '',
+          accessToken: account?.accessToken || ''
+        };
+        setInstagramAccount(newAcct);
+        setInstagramConnected(true);
+        setIsConnectModalOpen(false);
+        setPopupWaiting(false);
+
+        if (user?.uid) {
+          localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(newAcct));
+          try {
+            await setDoc(doc(db, 'users', user.uid), {
+              instagramConnected: true,
+              instagramAccountId: newAcct.id,
+              instagramHandle: newAcct.username
+            }, { merge: true });
+          } catch (e) {}
+        }
+        if (newAcct.accessToken) {
+          loadInstagramMedia(newAcct.accessToken);
+        }
+      } else if (event.data && event.data.type === 'INSTAGRAM_AUTH_ERROR') {
+        setPopupWaiting(false);
+        setTokenError(event.data.error || 'Authentication notice');
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, [user?.uid]);
+
   /**
-   * PART 1: FRONTEND META OAUTH REDIRECT HANDLER
-   * Initiates Meta's secure OAuth dialog with required scopes and user.uid as state.
+   * Opens the Connect Modal where users can trigger Popup OAuth or Paste Direct Token
    */
   const handleConnectInstagram = () => {
-    if (!user || !user.uid) {
-      console.warn("Cannot initiate Meta OAuth without authenticated user.");
-      return;
-    }
+    setIsConnectModalOpen(true);
+    setTokenError(null);
+  };
 
-    setIsRedirectingToMeta(true);
+  /**
+   * Opens centered popup window directly to OAuth provider (NO full page reload)
+   */
+  const handleOpenOAuthPopup = () => {
+    if (!user || !user.uid) return;
+    setPopupWaiting(true);
+    setTokenError(null);
 
-    // 1. Meta App ID template variable (configurable via VITE_META_APP_ID)
-    const YOUR_META_APP_ID = import.meta.env.VITE_META_APP_ID || "1097121733196692";
-
-    // 2. Redirect URI pointing to Supabase Edge Function (or Firebase fallback)
+    const appId = (customAppId || '1097121733196692').trim();
+    localStorage.setItem('meta_app_id', appId);
     const REDIRECT_URI =
       import.meta.env.VITE_AUTH_CALLBACK_URL ||
       "https://bcrxhujkttforhmotrkj.supabase.co/functions/v1/auth-instagram-callback";
 
-    // 3. Instagram Business Login Scopes
-    const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments";
+    let authUrl = "";
+    if (loginDialogType === 'facebook') {
+      const scope = "instagram_manage_messages,instagram_manage_comments,pages_manage_metadata,pages_show_list,pages_read_engagement";
+      authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(
+        appId
+      )}&redirect_uri=${encodeURIComponent(
+        REDIRECT_URI
+      )}&scope=${encodeURIComponent(
+        scope
+      )}&response_type=code&state=${encodeURIComponent(user.uid)}`;
+    } else {
+      const scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments";
+      authUrl = `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=1&client_id=${encodeURIComponent(
+        appId
+      )}&redirect_uri=${encodeURIComponent(
+        REDIRECT_URI
+      )}&scope=${encodeURIComponent(
+        scope
+      )}&response_type=code&state=${encodeURIComponent(user.uid)}`;
+    }
 
-    // 4. Construct Instagram OAuth URL with required query parameters
-    const instagramOAuthUrl = `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=1&client_id=${encodeURIComponent(
-      YOUR_META_APP_ID
-    )}&redirect_uri=${encodeURIComponent(
-      REDIRECT_URI
-    )}&scope=${encodeURIComponent(
-      scope
-    )}&response_type=code&state=${encodeURIComponent(user.uid)}`;
+    const width = 620;
+    const height = 750;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
 
-    // 5. Redirect the user's browser window to Instagram's OAuth dialog endpoint
-    window.location.href = instagramOAuthUrl;
+    const popup = window.open(
+      authUrl,
+      'InstagramOAuthPopup',
+      `width=${width},height=${height},left=${left},top=${top},status=no,toolbar=no,menubar=no,location=yes,resizable=yes`
+    );
+
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+      alert("Popup was blocked by your browser! Please allow popups for app.mridalini.com in your browser address bar.");
+      setPopupWaiting(false);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(timer);
+        setPopupWaiting(false);
+      }
+    }, 1000);
+  };
+
+  /**
+   * Verify and connect via direct Meta Graph API Token (100% Guaranteed Fail-Safe)
+   */
+  const handleVerifyManualToken = async () => {
+    const token = manualTokenInput.trim();
+    if (!token) return;
+    setIsVerifyingToken(true);
+    setTokenError(null);
+
+    try {
+      const res = await fetch(
+        `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${encodeURIComponent(
+          token
+        )}`
+      );
+      const data = await res.json();
+
+      if (data && data.id && data.username) {
+        const newAcct = {
+          id: data.id,
+          username: data.username,
+          name: data.name || data.username,
+          accountType: data.account_type || 'BUSINESS',
+          profilePictureUrl: data.profile_picture_url || '',
+          accessToken: token
+        };
+        setInstagramAccount(newAcct);
+        setInstagramConnected(true);
+        setIsConnectModalOpen(false);
+        setManualTokenInput('');
+
+        if (user?.uid) {
+          localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(newAcct));
+          try {
+            await setDoc(doc(db, 'users', user.uid), {
+              instagramConnected: true,
+              instagramAccountId: newAcct.id,
+              instagramHandle: newAcct.username
+            }, { merge: true });
+          } catch (e) {}
+        }
+        loadInstagramMedia(token);
+      } else {
+        setTokenError(data.error?.message || "Invalid Instagram token. Please check and try again.");
+      }
+    } catch (err) {
+      setTokenError(err.message || "Failed to verify token with Instagram API.");
+    } finally {
+      setIsVerifyingToken(false);
+    }
   };
 
   const loadInstagramAccount = async () => {
@@ -1414,6 +1555,192 @@ export default function App() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Instagram Account Connection Modal (Popup OAuth & Direct Token) */}
+          {isConnectModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                {/* Header */}
+                <div className="flex items-center justify-between p-6 border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center shadow-lg shadow-rose-950/40">
+                      <Instagram className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Connect Instagram Account</h3>
+                      <p className="text-xs text-slate-400">Choose popup OAuth or direct Graph API token</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsConnectModalOpen(false)}
+                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-slate-800 bg-slate-950/50">
+                  <button
+                    onClick={() => setActiveConnectTab('popup')}
+                    className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center gap-2 border-b-2 transition ${
+                      activeConnectTab === 'popup'
+                        ? 'border-rose-500 text-rose-400 bg-rose-950/10'
+                        : 'border-transparent text-slate-400 hover:text-slate-300'
+                    }`}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Meta Popup Login</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveConnectTab('token')}
+                    className={`flex-1 py-3 text-xs font-semibold flex items-center justify-center gap-2 border-b-2 transition ${
+                      activeConnectTab === 'token'
+                        ? 'border-rose-500 text-rose-400 bg-rose-950/10'
+                        : 'border-transparent text-slate-400 hover:text-slate-300'
+                    }`}
+                  >
+                    <Key className="w-3.5 h-3.5" />
+                    <span>Direct Graph API Token</span>
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  {tokenError && (
+                    <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/80 text-rose-300 text-xs flex items-start gap-2.5">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
+                      <span>{tokenError}</span>
+                    </div>
+                  )}
+
+                  {activeConnectTab === 'popup' ? (
+                    <div className="space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-semibold text-slate-300">
+                            Meta App ID
+                          </label>
+                          <span className="text-[11px] text-slate-400">
+                            From developers.facebook.com
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={customAppId}
+                          onChange={(e) => setCustomAppId(e.target.value)}
+                          placeholder="e.g. 1097121733196692"
+                          className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                          OAuth Login Dialog
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setLoginDialogType('instagram')}
+                            className={`p-3 rounded-xl border text-left transition ${
+                              loginDialogType === 'instagram'
+                                ? 'bg-rose-950/30 border-rose-500 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="font-semibold text-xs flex items-center gap-1.5">
+                              <Instagram className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Instagram Dialog</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              instagram.com/oauth
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLoginDialogType('facebook')}
+                            className={`p-3 rounded-xl border text-left transition ${
+                              loginDialogType === 'facebook'
+                                ? 'bg-rose-950/30 border-rose-500 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="font-semibold text-xs flex items-center gap-1.5">
+                              <span className="text-blue-400 font-bold">f</span>
+                              <span>Facebook Dialog</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              facebook.com/dialog
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pt-2">
+                        <button
+                          onClick={handleOpenOAuthPopup}
+                          disabled={popupWaiting}
+                          className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 transition flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-rose-950/30 disabled:opacity-50"
+                        >
+                          {popupWaiting ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>Waiting for popup authorization...</span>
+                            </>
+                          ) : (
+                            <>
+                              <ExternalLink className="w-4 h-4" />
+                              <span>Launch Login Popup Window</span>
+                            </>
+                          )}
+                        </button>
+                        <p className="text-[11px] text-slate-400 text-center mt-2">
+                          Opens in a popup window without leaving or redirecting your dashboard.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                          Instagram User Access Token
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={manualTokenInput}
+                          onChange={(e) => setManualTokenInput(e.target.value)}
+                          placeholder="Paste your Instagram Graph API Token (e.g. IGAAPl048uu5RBZAGE3...)"
+                          className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-rose-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1.5">
+                          Instant connection: You can generate a token in Meta Graph API Explorer or Meta Business Tools.
+                        </p>
+                      </div>
+
+                      <div className="pt-2">
+                        <button
+                          onClick={handleVerifyManualToken}
+                          disabled={isVerifyingToken || !manualTokenInput.trim()}
+                          className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-emerald-600 hover:bg-emerald-500 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          {isVerifyingToken ? (
+                            <>
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>Verifying token with Meta API...</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck className="w-4 h-4" />
+                              <span>Verify &amp; Link Account</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
