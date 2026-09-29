@@ -1,12 +1,12 @@
 {
-  "projectId": "global-operator-2bndl",
-  "appId": "1:84831818696:web:3bf87765f72b644bab26fd",
-  "apiKey": "AIzaSyDH0ecbopGMII4pwciTJe57HtCQEuB-6is",
-  "authDomain": "global-operator-2bndl.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-autodminstagrama-1438c4db-f6b2-4675-b121-6ab7980372cb",
-  "storageBucket": "global-operator-2bndl.firebasestorage.app",
-  "messagingSenderId": "84831818696",
-  "measurementId": "",
-  "oAuthClientId": "84831818696-o2q95bnid5h0i48uj9v9bpeb368qi5nb.apps.googleusercontent.com",
+  "projectId": "autodm-mridalini",
+  "appId": "1:607066007132:web:eba74328aa07ccaef96899",
+  "apiKey": "AIzaSyDG1LPs5a_o01Fgl3BMiAUa-w8vLeO35D4",
+  "authDomain": "autodm-mridalini.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "autodm-mridalini.firebasestorage.app",
+  "messagingSenderId": "607066007132",
+  "measurementId": "G-JBS9W01448",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

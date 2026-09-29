@@ -84,25 +84,13 @@ const DEFAULT_FUNNEL = {
 };
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('autodm_active_user');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    // Automatically initialize authenticated session for Mridalini Official so custom domains work immediately!
-    return {
-      uid: "creator_mridalini_900",
-      displayName: "Mridalini Official",
-      email: "mritunjaym900@gmail.com",
-      photoURL: null
-    };
-  });
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState(null);
 
   // Instagram Integration State
-  const [instagramConnected, setInstagramConnected] = useState(true);
+  const [instagramConnected, setInstagramConnected] = useState(false);
   const [instagramAccount, setInstagramAccount] = useState(null);
   const [instagramMedia, setInstagramMedia] = useState([]);
   const [funnels, setFunnels] = useState([]);
@@ -1231,31 +1219,16 @@ export default function App() {
                   </div>
 
                   <div className="p-3 bg-black/40 rounded-xl border border-rose-900/60 text-xs text-slate-300 space-y-1.5 font-mono">
-                    <div>1. Go to <a href="https://console.firebase.google.com/project/global-operator-2bndl/authentication/settings" target="_blank" rel="noreferrer" className="text-rose-400 underline hover:text-rose-300">Firebase Console &rarr; Auth &rarr; Settings &rarr; Authorized domains</a></div>
+                    <div>1. Go to <a href="https://console.firebase.google.com/project/autodm-mridalini/authentication/settings" target="_blank" rel="noreferrer" className="text-rose-400 underline hover:text-rose-300">Firebase Console &rarr; Auth &rarr; Settings &rarr; Authorized domains</a></div>
                     <div>2. Click &ldquo;Add domain&rdquo; and enter: <span className="text-white font-bold">{window.location.hostname}</span></div>
                   </div>
 
                   <div className="pt-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUser({
-                          uid: "creator_mridalini_900",
-                          displayName: "Mridalini Creator",
-                          email: "mritunjaym900@gmail.com",
-                          photoURL: null
-                        });
-                        setInstagramConnected(true);
-                      }}
-                      className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer"
-                    >
-                      ⚡ Enter Dashboard Now (Bypass)
-                    </button>
                     <a
-                      href="https://console.firebase.google.com/project/global-operator-2bndl/authentication/settings"
+                      href="https://console.firebase.google.com/project/autodm-mridalini/authentication/settings"
                       target="_blank"
                       rel="noreferrer"
-                      className="text-xs text-rose-300 hover:text-white underline font-medium"
+                      className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 transition-colors inline-block"
                     >
                       Open Firebase Console &rarr;
                     </a>
@@ -1266,36 +1239,39 @@ export default function App() {
           )}
 
           {/* Primary Action Button */}
-          <div className="mb-14 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <button
-              onClick={() => {
-                const active = {
-                  uid: "creator_mridalini_900",
-                  displayName: "Mridalini Official",
-                  email: "mritunjaym900@gmail.com",
-                  photoURL: null
-                };
-                setUser(active);
-                localStorage.setItem('autodm_active_user', JSON.stringify(active));
-                setInstagramConnected(true);
-              }}
-              className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base sm:text-lg font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-xl shadow-rose-950/50 hover:shadow-rose-900/80 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer"
-            >
-              <span>🚀 Open AutoDM Dashboard</span>
-            </button>
-
+          <div className="mb-14 flex flex-col items-center justify-center gap-3">
             <button
               onClick={handleGoogleSignIn}
               disabled={isSubmitting}
-              className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl text-sm font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-3 px-8 py-4 rounded-xl text-base sm:text-lg font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-xl shadow-rose-950/50 hover:shadow-rose-900/80 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Connecting...</span>
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Connecting to Google...</span>
                 </>
               ) : (
-                <span>Sign in with Google</span>
+                <>
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path
+                      fill="#EA4335"
+                      d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
+                    />
+                    <path
+                      fill="#4285F4"
+                      d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12 0 14.5s.7 4.8 1.9 7.2l3.7-2.9z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2-6.4-4.8L1.9 16.9C3.7 20.9 7.5 23.5 12 23.5z"
+                    />
+                  </svg>
+                  <span>Sign In with Google</span>
+                </>
               )}
             </button>
           </div>

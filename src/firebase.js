@@ -2,22 +2,22 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
-// Fully configured Firebase credentials provisioned for AutoDM
+// Fully configured Firebase credentials for autodm-mridalini
 export const firebaseConfig = {
-  apiKey: "AIzaSyDH0ecbopGMII4pwciTJe57HtCQEuB-6is",
-  authDomain: "global-operator-2bndl.firebaseapp.com",
-  projectId: "global-operator-2bndl",
-  storageBucket: "global-operator-2bndl.firebasestorage.app",
-  messagingSenderId: "84831818696",
-  appId: "1:84831818696:web:3bf87765f72b644bab26fd",
-  firestoreDatabaseId: "ai-studio-autodminstagrama-1438c4db-f6b2-4675-b121-6ab7980372cb"
+  apiKey: "AIzaSyDG1LPs5a_o01Fgl3BMiAUa-w8vLeO35D4",
+  authDomain: "autodm-mridalini.firebaseapp.com",
+  projectId: "autodm-mridalini",
+  storageBucket: "autodm-mridalini.firebasestorage.app",
+  messagingSenderId: "607066007132",
+  appId: "1:607066007132:web:eba74328aa07ccaef96899",
+  measurementId: "G-JBS9W01448"
 };
 
 // Initialize Firebase App
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firestore with the provisioned named database ID
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Initialize Firestore
+export const db = getFirestore(app);
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
