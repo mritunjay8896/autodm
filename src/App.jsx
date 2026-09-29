@@ -103,7 +103,9 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [webhookInfo, setWebhookInfo] = useState(null);
   const [activeTab, setActiveTab] = useState('funnels'); // funnels, webhook, simulator, logs
-  const [loadingIg, setLoadingIg] = useState(false);
+  const [isRedirectingToMeta, setIsRedirectingToMeta] = useState(false);
+  const [isConnectingDemo, setIsConnectingDemo] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
 
   // New Funnel Form State
@@ -194,6 +196,8 @@ export default function App() {
       return;
     }
 
+    setIsRedirectingToMeta(true);
+
     // 1. Meta App ID template variable (configurable via VITE_META_APP_ID)
     const YOUR_META_APP_ID = import.meta.env.VITE_META_APP_ID || "1097121733196692";
 
@@ -222,11 +226,9 @@ export default function App() {
     if (!user || !user.uid) {
       setInstagramAccount(null);
       setInstagramConnected(false);
-      setLoadingIg(false);
       return;
     }
 
-    setLoadingIg(true);
     try {
       // 1. Check user-specific localStorage first
       const stored = localStorage.getItem(`autodm_account_${user.uid}`);
@@ -276,15 +278,13 @@ export default function App() {
       setInstagramMedia([]);
     } catch (err) {
       console.warn('Notice loading Instagram account:', err);
-    } finally {
-      setLoadingIg(false);
     }
   };
 
   // Connect the demo @mridaliniofficial account for this tenant if requested
   const handleConnectDemoAccount = async () => {
     if (!user || !user.uid) return;
-    setLoadingIg(true);
+    setIsConnectingDemo(true);
     try {
       const directRes = await fetch(
         `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
@@ -317,14 +317,14 @@ export default function App() {
     } catch (err) {
       console.warn('Notice loading demo account:', err);
     } finally {
-      setLoadingIg(false);
+      setIsConnectingDemo(false);
     }
   };
 
   // Disconnect Instagram from this tenant
   const handleDisconnectInstagram = async () => {
     if (!user || !user.uid) return;
-    setLoadingIg(true);
+    setIsDisconnecting(true);
     try {
       localStorage.removeItem(`autodm_account_${user.uid}`);
       try {
@@ -341,7 +341,7 @@ export default function App() {
     } catch (err) {
       console.error('Error disconnecting:', err);
     } finally {
-      setLoadingIg(false);
+      setIsDisconnecting(false);
     }
   };
 
@@ -779,39 +779,57 @@ export default function App() {
                   <>
                     <button
                       onClick={handleConnectInstagram}
-                      disabled={loadingIg}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                      disabled={isRedirectingToMeta || isDisconnecting}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer disabled:opacity-50"
                       title="Connect a different Instagram account with Meta"
                     >
-                      <RefreshCw className={`w-4 h-4 ${loadingIg ? 'animate-spin text-rose-400' : 'text-slate-400'}`} />
-                      <span>Switch / Reconnect Account</span>
+                      {isRedirectingToMeta ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-rose-400" />
+                          <span>Redirecting to Meta...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4 text-slate-400" />
+                          <span>Switch / Reconnect Account</span>
+                        </>
+                      )}
                     </button>
 
                     <button
                       onClick={handleDisconnectInstagram}
-                      disabled={loadingIg}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-rose-400 hover:text-rose-300 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-900/60 transition cursor-pointer"
+                      disabled={isRedirectingToMeta || isDisconnecting}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-rose-400 hover:text-rose-300 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-900/60 transition cursor-pointer disabled:opacity-50"
                       title="Disconnect Instagram from this user"
                     >
-                      <Unlink className="w-4 h-4" />
-                      <span>Disconnect</span>
+                      {isDisconnecting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin text-rose-400" />
+                          <span>Disconnecting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlink className="w-4 h-4" />
+                          <span>Disconnect</span>
+                        </>
+                      )}
                     </button>
                   </>
                 ) : (
                   <>
                     <button
                       onClick={handleConnectInstagram}
-                      disabled={loadingIg}
+                      disabled={isRedirectingToMeta || isConnectingDemo}
                       className="inline-flex items-center justify-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-600 hover:via-rose-700 hover:to-purple-700 shadow-lg shadow-rose-950/40 transition-all cursor-pointer disabled:opacity-50"
                     >
-                      {loadingIg ? (
+                      {isRedirectingToMeta ? (
                         <>
                           <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Connecting Meta...</span>
+                          <span>Redirecting to Meta...</span>
                         </>
                       ) : (
                         <>
-                          <span>🔌</span>
+                          <Instagram className="w-4 h-4" />
                           <span>Connect Instagram Business Account</span>
                         </>
                       )}
@@ -819,12 +837,21 @@ export default function App() {
 
                     <button
                       onClick={handleConnectDemoAccount}
-                      disabled={loadingIg}
-                      className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                      disabled={isRedirectingToMeta || isConnectingDemo}
+                      className="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition cursor-pointer disabled:opacity-50"
                       title="Load @mridaliniofficial test account"
                     >
-                      <span>🧪</span>
-                      <span>Use Test (@mridaliniofficial)</span>
+                      {isConnectingDemo ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Loading Test Account...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🧪</span>
+                          <span>Use Test (@mridaliniofficial)</span>
+                        </>
+                      )}
                     </button>
                   </>
                 )}
