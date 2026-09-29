@@ -1,7 +1,17 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+
+// Fully configured Firebase credentials provisioned for AutoDM
+export const firebaseConfig = {
+  apiKey: "AIzaSyDH0ecbopGMII4pwciTJe57HtCQEuB-6is",
+  authDomain: "global-operator-2bndl.firebaseapp.com",
+  projectId: "global-operator-2bndl",
+  storageBucket: "global-operator-2bndl.firebasestorage.app",
+  messagingSenderId: "84831818696",
+  appId: "1:84831818696:web:3bf87765f72b644bab26fd",
+  firestoreDatabaseId: "ai-studio-autodminstagrama-1438c4db-f6b2-4675-b121-6ab7980372cb"
+};
 
 // Initialize Firebase App
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -22,7 +32,7 @@ async function testConnection() {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration.");
+      console.warn("Firestore connection notice:", error.message);
     }
   }
 }

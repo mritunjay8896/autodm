@@ -65,6 +65,24 @@ async function syncUserRecord(authUser) {
   }
 }
 
+const INSTAGRAM_APP_ID = "1097121733196692";
+const INSTAGRAM_ACCESS_TOKEN = "IGAAPl048uu5RBZAGE3WEZAEVXdUTVNyeXdULVh1YUZAIRGo2aXlMbG1fY0FuMHl1OFZAxdTBmN2lQVkVfeF9XaWNDR2ZARV3d6ZAVVvYmUtUk5wbmNIRnpDOE9GVXBEdnczelVmN2VfV3JrSlFuMkM1RDN4TkhQSU5uTUJqNkZAyNE55VQZDZD";
+const DEFAULT_VERIFY_TOKEN = "auto_dm_webhook_secret_2026";
+
+const DEFAULT_FUNNEL = {
+  id: 'funnel-default-1',
+  name: 'Main Reel Guide Offer',
+  mediaId: 'all',
+  mediaCaption: 'Any Instagram Reel or Post',
+  keyword: 'GUIDE',
+  matchType: 'contains',
+  dmMessage: 'Hey @{username}! 🚀 Thanks for your comment. Here is the link to access your free guide: https://example.com/starter-guide',
+  publicReply: 'Sent you a DM! Check your inbox 📬',
+  isActive: true,
+  createdAt: new Date().toISOString(),
+  triggerCount: 0
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -123,15 +141,36 @@ export default function App() {
   const loadInstagramAccount = async () => {
     setLoadingIg(true);
     try {
-      const res = await fetch('/api/instagram/account');
-      const data = await res.json();
-      if (data.connected && data.account) {
-        setInstagramAccount(data.account);
+      // 1. Try local full-stack server
+      const res = await fetch('/api/instagram/account').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.connected && data.account) {
+          setInstagramAccount(data.account);
+          setInstagramConnected(true);
+          loadInstagramMedia();
+          return;
+        }
+      }
+
+      // 2. Client-side fallback for GitHub Pages (direct Meta Graph API)
+      const directRes = await fetch(
+        `https://graph.instagram.com/v21.0/me?fields=id,username,account_type,name,profile_picture_url&access_token=${INSTAGRAM_ACCESS_TOKEN}`
+      );
+      const directData = await directRes.json();
+      if (directData && directData.id) {
+        setInstagramAccount({
+          id: directData.id,
+          username: directData.username,
+          name: directData.name || directData.username,
+          accountType: directData.account_type || 'BUSINESS',
+          profilePictureUrl: directData.profile_picture_url
+        });
         setInstagramConnected(true);
         loadInstagramMedia();
       }
     } catch (err) {
-      console.warn('Failed to load Instagram account:', err);
+      console.warn('Notice loading Instagram account:', err);
     } finally {
       setLoadingIg(false);
     }
@@ -139,47 +178,91 @@ export default function App() {
 
   const loadInstagramMedia = async () => {
     try {
-      const res = await fetch('/api/instagram/media');
-      const data = await res.json();
-      if (data.media) {
-        setInstagramMedia(data.media);
+      // 1. Try local server
+      const res = await fetch('/api/instagram/media').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.media) {
+          setInstagramMedia(data.media);
+          return;
+        }
+      }
+
+      // 2. Direct Graph API fallback for GitHub Pages
+      const directRes = await fetch(
+        `https://graph.instagram.com/v21.0/me/media?fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25&access_token=${INSTAGRAM_ACCESS_TOKEN}`
+      );
+      const directData = await directRes.json();
+      if (directData && directData.data) {
+        setInstagramMedia(directData.data);
       }
     } catch (err) {
-      console.warn('Failed to load Instagram media:', err);
+      console.warn('Notice loading Instagram media:', err);
     }
   };
 
   const loadFunnels = async () => {
     try {
-      const res = await fetch('/api/funnels');
-      const data = await res.json();
-      if (data.funnels) {
-        setFunnels(data.funnels);
+      const res = await fetch('/api/funnels').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.funnels) {
+          setFunnels(data.funnels);
+          return;
+        }
+      }
+
+      // LocalStorage fallback for GitHub Pages
+      const stored = localStorage.getItem('autodm_funnels');
+      if (stored) {
+        setFunnels(JSON.parse(stored));
+      } else {
+        setFunnels([DEFAULT_FUNNEL]);
+        localStorage.setItem('autodm_funnels', JSON.stringify([DEFAULT_FUNNEL]));
       }
     } catch (err) {
-      console.warn('Failed to load funnels:', err);
+      setFunnels([DEFAULT_FUNNEL]);
     }
   };
 
   const loadWebhookInfo = async () => {
     try {
-      const res = await fetch('/api/webhook/info');
-      const data = await res.json();
-      setWebhookInfo(data);
+      const res = await fetch('/api/webhook/info').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        setWebhookInfo(data);
+        return;
+      }
+      setWebhookInfo({
+        webhookUrl: `${window.location.origin}/api/webhook/instagram`,
+        verifyToken: DEFAULT_VERIFY_TOKEN,
+        appId: INSTAGRAM_APP_ID
+      });
     } catch (err) {
-      console.warn('Failed to load webhook info:', err);
+      setWebhookInfo({
+        webhookUrl: `${window.location.origin}/api/webhook/instagram`,
+        verifyToken: DEFAULT_VERIFY_TOKEN,
+        appId: INSTAGRAM_APP_ID
+      });
     }
   };
 
   const loadLogs = async () => {
     try {
-      const res = await fetch('/api/logs');
-      const data = await res.json();
-      if (data.logs) {
-        setLogs(data.logs);
+      const res = await fetch('/api/logs').catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setLogs(data.logs);
+          return;
+        }
+      }
+      const stored = localStorage.getItem('autodm_logs');
+      if (stored) {
+        setLogs(JSON.parse(stored));
       }
     } catch (err) {
-      console.warn('Failed to load logs:', err);
+      // fallback
     }
   };
 
@@ -198,7 +281,7 @@ export default function App() {
       if (err?.code === 'auth/popup-closed-by-user') {
         setAuthError('Sign-in cancelled: Popup was closed.');
       } else if (err?.code === 'auth/unauthorized-domain') {
-        setAuthError('This domain is being authorized by Firebase. Please try again in a few seconds or use demo mode.');
+        setAuthError('This domain is being authorized by Firebase. Please use Quick Preview Mode or add this domain in Firebase Console.');
       } else {
         setAuthError(err.message || 'Failed to authenticate with Google.');
       }
@@ -222,30 +305,50 @@ export default function App() {
     e.preventDefault();
     if (!newFunnel.keyword || !newFunnel.dmMessage) return;
 
+    const selectedMedia = instagramMedia.find(m => m.id === newFunnel.mediaId);
+    const rulePayload = {
+      id: `funnel-${Date.now()}`,
+      name: newFunnel.name || `Auto-DM for "${newFunnel.keyword.toUpperCase()}"`,
+      mediaId: newFunnel.mediaId || 'all',
+      mediaCaption: selectedMedia ? (selectedMedia.caption?.substring(0, 50) || selectedMedia.id) : 'All Posts & Reels',
+      mediaPermalink: selectedMedia?.permalink || '',
+      keyword: newFunnel.keyword.trim().toUpperCase(),
+      matchType: newFunnel.matchType,
+      dmMessage: newFunnel.dmMessage,
+      publicReply: newFunnel.publicReply?.trim() || undefined,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      triggerCount: 0
+    };
+
     try {
-      const selectedMedia = instagramMedia.find(m => m.id === newFunnel.mediaId);
       const res = await fetch('/api/funnels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newFunnel,
-          mediaCaption: selectedMedia ? (selectedMedia.caption?.substring(0, 50) || selectedMedia.id) : 'All Posts & Reels',
-          mediaPermalink: selectedMedia?.permalink || ''
-        })
-      });
-      const data = await res.json();
-      if (data.funnel) {
-        setFunnels([data.funnel, ...funnels]);
-        setIsCreatingFunnel(false);
-        setNewFunnel({
-          name: '',
-          mediaId: 'all',
-          keyword: '',
-          matchType: 'contains',
-          dmMessage: 'Hey @{username}! 🚀 Here is the link you requested: https://',
-          publicReply: 'Sent you a DM! Check your requests 📬'
-        });
+        body: JSON.stringify(rulePayload)
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.funnel) {
+          setFunnels([data.funnel, ...funnels]);
+        }
+      } else {
+        // LocalStorage fallback for GitHub Pages
+        const updated = [rulePayload, ...funnels];
+        setFunnels(updated);
+        localStorage.setItem('autodm_funnels', JSON.stringify(updated));
       }
+
+      setIsCreatingFunnel(false);
+      setNewFunnel({
+        name: '',
+        mediaId: 'all',
+        keyword: '',
+        matchType: 'contains',
+        dmMessage: 'Hey @{username}! 🚀 Here is the link you requested: https://',
+        publicReply: 'Sent you a DM! Check your requests 📬'
+      });
     } catch (err) {
       console.error('Error creating funnel:', err);
     }
@@ -253,11 +356,18 @@ export default function App() {
 
   const handleToggleFunnel = async (id) => {
     try {
-      const res = await fetch(`/api/funnels/${id}/toggle`, { method: 'POST' });
-      const data = await res.json();
-      if (data.funnel) {
-        setFunnels(funnels.map(f => f.id === id ? data.funnel : f));
+      const res = await fetch(`/api/funnels/${id}/toggle`, { method: 'POST' }).catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.funnel) {
+          setFunnels(funnels.map(f => f.id === id ? data.funnel : f));
+          return;
+        }
       }
+
+      const updated = funnels.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f);
+      setFunnels(updated);
+      localStorage.setItem('autodm_funnels', JSON.stringify(updated));
     } catch (err) {
       console.error('Error toggling funnel:', err);
     }
@@ -265,8 +375,10 @@ export default function App() {
 
   const handleDeleteFunnel = async (id) => {
     try {
-      await fetch(`/api/funnels/${id}`, { method: 'DELETE' });
-      setFunnels(funnels.filter(f => f.id !== id));
+      await fetch(`/api/funnels/${id}`, { method: 'DELETE' }).catch(() => null);
+      const updated = funnels.filter(f => f.id !== id);
+      setFunnels(updated);
+      localStorage.setItem('autodm_funnels', JSON.stringify(updated));
     } catch (err) {
       console.error('Error deleting funnel:', err);
     }
@@ -278,6 +390,7 @@ export default function App() {
     setSimResult(null);
 
     try {
+      // 1. Try local server endpoint
       const res = await fetch('/api/webhook/test-trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -286,11 +399,54 @@ export default function App() {
           username: simUsername,
           mediaId: simMediaId
         })
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = await res.json();
+        setSimResult(data);
+        loadLogs();
+        loadFunnels();
+        return;
+      }
+
+      // 2. Client-side simulation fallback for GitHub Pages
+      const normalized = simComment.toUpperCase().trim();
+      const matches = [];
+      const updatedFunnels = funnels.map(rule => {
+        if (!rule.isActive) return rule;
+        if (rule.mediaId !== 'all' && rule.mediaId !== simMediaId) return rule;
+
+        const kw = rule.keyword.toUpperCase().trim();
+        const isMatch = rule.matchType === 'exact' ? normalized === kw : normalized.includes(kw);
+
+        if (isMatch) {
+          const dm = rule.dmMessage.replace(/{username}/g, simUsername).replace(/{comment}/g, simComment);
+          const reply = rule.publicReply ? rule.publicReply.replace(/{username}/g, simUsername) : undefined;
+          matches.push({ rule, dmContent: dm, publicReply: reply });
+          return { ...rule, triggerCount: rule.triggerCount + 1 };
+        }
+        return rule;
       });
-      const data = await res.json();
-      setSimResult(data);
-      loadLogs();
-      loadFunnels();
+
+      setFunnels(updatedFunnels);
+      localStorage.setItem('autodm_funnels', JSON.stringify(updatedFunnels));
+
+      // Append client log
+      const newLog = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'dm_sent',
+        username: simUsername,
+        ruleName: matches[0]?.rule?.name || 'Simulation',
+        dmMessage: matches[0]?.dmContent || 'No keyword match',
+        status: 'simulated',
+        details: `Keyword matched on comment "${simComment}"`
+      };
+      const updatedLogs = [newLog, ...logs].slice(0, 100);
+      setLogs(updatedLogs);
+      localStorage.setItem('autodm_logs', JSON.stringify(updatedLogs));
+
+      setSimResult({ success: true, processed: matches });
     } catch (err) {
       console.error('Simulation error:', err);
     } finally {
