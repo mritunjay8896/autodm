@@ -1,0 +1,6 @@
+{
+  "name": "AutoDM - Instagram Auto-DM Platform",
+  "description": "Multi-tenant Instagram Auto-DM SaaS platform for comment-to-DM funnels and automated conversions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
