@@ -163,25 +163,58 @@ export default function App() {
     const connected = params.get('connected');
     const handle = params.get('handle');
     const accountId = params.get('id');
+    const token = params.get('token');
     const oauthError = params.get('error');
 
     if (connected === 'true') {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      if (user?.uid && accountId) {
-        const newAcct = {
-          id: accountId,
-          username: handle || 'instagram_user',
-          name: handle || 'Instagram User',
-          accountType: 'BUSINESS',
-          profilePictureUrl: '',
-          accessToken: ''
-        };
-        setInstagramAccount(newAcct);
-        setInstagramConnected(true);
-        localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(newAcct));
+      const newAcct = {
+        id: accountId || 'connected',
+        username: handle || 'instagram_user',
+        name: handle || 'Instagram User',
+        accountType: 'BUSINESS',
+        profilePictureUrl: '',
+        accessToken: token || ''
+      };
+
+      // If this was opened in a popup window, notify parent and close immediately
+      if (window.opener) {
+        try {
+          window.opener.postMessage({
+            type: 'INSTAGRAM_AUTH_SUCCESS',
+            handle: newAcct.username,
+            id: newAcct.id,
+            account: newAcct
+          }, '*');
+        } catch (e) {}
+        window.close();
+        return;
       }
-      loadInstagramAccount();
+
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setInstagramAccount(newAcct);
+      setInstagramConnected(true);
+      if (user?.uid) {
+        localStorage.setItem(`autodm_account_${user.uid}`, JSON.stringify(newAcct));
+        try {
+          setDoc(doc(db, 'users', user.uid), {
+            instagramConnected: true,
+            instagramAccountId: newAcct.id,
+            instagramHandle: newAcct.username,
+            instagramAccessToken: newAcct.accessToken || ''
+          }, { merge: true });
+        } catch (e) {}
+      }
+      if (token) {
+        loadInstagramMedia(token);
+      }
     } else if (oauthError) {
+      if (window.opener) {
+        try {
+          window.opener.postMessage({ type: 'INSTAGRAM_AUTH_ERROR', error: oauthError }, '*');
+        } catch (e) {}
+        window.close();
+        return;
+      }
       window.history.replaceState({}, document.title, window.location.pathname);
       console.warn("Instagram connection error:", oauthError);
     }
