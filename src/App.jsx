@@ -533,19 +533,21 @@ export default function App() {
     if (!activeToken) return;
 
     try {
-      // 1. Try local server
-      const res = await fetch('/api/instagram/media').catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.media) {
-          setInstagramMedia(data.media);
-          return;
+      // 1. Try local server only if localhost
+      if (isLocalHost) {
+        const res = await fetch('/api/instagram/media').catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json();
+          if (data.media) {
+            setInstagramMedia(data.media);
+            return;
+          }
         }
       }
 
-      // 2. Direct Graph API fallback
+      // 2. Direct Graph API fetch
       const directRes = await fetch(
-        `https://graph.instagram.com/v21.0/me/media?fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25&access_token=${activeToken}`
+        `https://graph.instagram.com/v21.0/me/media?fields=id,caption,media_type,permalink,timestamp,thumbnail_url,media_url&limit=25&access_token=${encodeURIComponent(activeToken)}`
       );
       const directData = await directRes.json();
       if (directData && directData.data) {
